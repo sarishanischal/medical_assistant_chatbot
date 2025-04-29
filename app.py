@@ -3,48 +3,53 @@ import streamlit as st
 from dotenv import load_dotenv
 import requests
 
-# Load environment variables
+# Load API keys from .env
 load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 HF_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
 
+# Streamlit setup
 st.set_page_config(page_title="Medical Assistant Chatbot", layout="centered")
 st.title("🩺 AI Medical Assistant")
-st.markdown("Get instant help for symptoms, medical conditions, and recommended treatments.")
+st.markdown("Ask about symptoms, diseases, medications, and treatments.")
 
-# Chat history
+# Initialize session state
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# Text input
-user_input = st.text_input("Describe your symptoms or ask a medical question:")
-
-# Groq LLM API call
+# Groq API Query
 def query_groq(message):
+    url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
         "Content-Type": "application/json"
     }
     data = {
-        "messages": [{"role": "user", "content": message}],
-        "model": "mixtral-8x7b-32768"  # or use "llama3-8b-8192" or another supported model
+        "model": "llama3-8b-8192",
+        "messages": [
+            {"role": "system", "content": "You are a helpful and trustworthy medical assistant who gives accurate, concise, and safe medical advice. You do not diagnose but suggest what a patient might consider."},
+            {"role": "user", "content": message}
+        ],
+        "temperature": 0.7
     }
 
-    response = requests.post("https://api.groq.com/openai/v1/chat/completions", json=data, headers=headers)
+    response = requests.post(url, headers=headers, json=data)
     response.raise_for_status()
     return response.json()["choices"][0]["message"]["content"]
 
-# Submit logic
+# User input
+user_input = st.text_input("Describe your symptoms or ask a medical question:")
+
 if user_input:
     st.session_state.chat_history.append(("You", user_input))
-    with st.spinner("Analyzing..."):
+    with st.spinner("Analyzing your query..."):
         try:
             bot_reply = query_groq(user_input)
         except Exception as e:
             bot_reply = f"⚠️ Error: {e}"
     st.session_state.chat_history.append(("MedicalBot", bot_reply))
 
-# Display chat
+# Chat history display
 for speaker, msg in st.session_state.chat_history:
     if speaker == "You":
         st.markdown(f"**🧑 {speaker}:** {msg}")
