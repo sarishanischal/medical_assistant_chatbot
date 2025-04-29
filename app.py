@@ -5,6 +5,8 @@ import requests
 from PIL import Image
 import io
 import fitz  # PyMuPDF
+import joblib
+from huggingface_hub import hf_hub_download
 
 # Load secrets
 load_dotenv()
@@ -13,7 +15,19 @@ HF_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
 
 st.set_page_config(page_title="Medical Assistant Chatbot", layout="centered")
 st.title("🩺 AI Medical Assistant")
-st.markdown("Describe your symptoms or upload medical reports for interpretation.")
+st.markdown("Describe your symptoms, check diabetes risk, or upload medical reports for interpretation.")
+
+# Load Diabetes Prediction Model from Hugging Face
+@st.cache_resource
+def load_diabetes_model():
+    model_path = hf_hub_download(
+        repo_id="jaik256/diabetes2o",
+        filename="diabetes_model.pkl",
+        token=HF_TOKEN
+    )
+    return joblib.load(model_path)
+
+diabetes_model = load_diabetes_model()
 
 # Chat history
 if "chat_history" not in st.session_state:
@@ -66,7 +80,7 @@ def classify_symptoms(text):
         filtered = [ent for ent in predictions if ent["entity_group"] in {"SYMPTOM", "DISEASE", "DRUG"}]
         if not filtered:
             return "🔍 No symptoms or medical terms clearly identified."
-        
+
         result_lines = [f"• **{ent['word']}** (*{ent['entity_group']}*)" for ent in filtered]
         return "🔍 **Identified Medical Terms:**\n" + "\n".join(result_lines)
 
@@ -119,6 +133,23 @@ if uploaded_file:
                 with st.spinner("Interpreting report..."):
                     simplified_explanation = query_groq(f"Explain this medical report in simple language:\n{pdf_text}")
                     st.markdown(f"🩺 **Simplified Explanation:**\n{simplified_explanation}")
+
+# ---------- Diabetes Prediction UI ----------
+st.subheader("🧪 Diabetes Risk Prediction")
+glucose = st.number_input("Glucose Level", min_value=0.0, max_value=300.0, step=1.0)
+bmi = st.number_input("BMI", min_value=0.0, max_value=60.0, step=0.1)
+age = st.number_input("Age", min_value=0, max_value=120)
+
+if st.button("Predict Diabetes Risk"):
+    input_data = [[glucose, bmi, age]]
+    try:
+        prediction = diabetes_model.predict(input_data)[0]
+        if prediction == 1:
+            st.error("⚠️ High Risk of Diabetes Detected")
+        else:
+            st.success("✅ Low Risk of Diabetes")
+    except Exception as e:
+        st.warning(f"Prediction error: {e}")
 
 # ---------- Main Chatbot UI ----------
 st.subheader("💬 Symptom Checker and Medical Q&A")
