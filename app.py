@@ -3,7 +3,7 @@ import streamlit as st
 from dotenv import load_dotenv
 import requests
 
-# Load secrets
+# Load secrets from .env
 load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 HF_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
@@ -11,26 +11,28 @@ HF_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
 # Streamlit config
 st.set_page_config(page_title="Medical Assistant Chatbot", layout="centered")
 st.title("🩺 AI Medical Assistant")
-st.markdown("Describe symptoms to get help with conditions, medicines, or finding a doctor.")
+st.markdown("Describe symptoms to get help with conditions, medicines, or doctor recommendations.")
 
 # Chat history
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# Groq API medical chat
+# Query Groq API
 def query_groq(message, include_medicine=False, include_doctor=False):
-    system_prompt = "You are a professional, safe, and helpful medical assistant. You give general advice only and do not diagnose."
-
+    system_prompt = (
+        "You are a professional, safe, and helpful medical assistant. "
+        "You give general advice only and do not diagnose or prescribe. "
+    )
     if include_medicine:
-        system_prompt += " When asked, you can suggest general over-the-counter medicines (with usage warnings)."
-    
+        system_prompt += "You can suggest over-the-counter medicines with clear safety notes. "
     if include_doctor:
-        system_prompt += " If necessary, suggest that the user consult a doctor and recommend types of specialists based on symptoms."
+        system_prompt += "Recommend a type of doctor if needed, like dermatologist, pediatrician, etc. "
 
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
         "Content-Type": "application/json"
     }
+
     data = {
         "model": "llama3-8b-8192",
         "messages": [
@@ -39,52 +41,55 @@ def query_groq(message, include_medicine=False, include_doctor=False):
         ],
         "temperature": 0.7
     }
+
     response = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=data)
     response.raise_for_status()
     return response.json()["choices"][0]["message"]["content"]
 
-# Hugging Face symptom classifier
+# Hugging Face NER (symptom/entity extraction)
 def classify_symptoms(text):
-    api_url = "https://api-inference.huggingface.co/models/julien-c/bert-symptom-classifier"
-    headers = {
-        "Authorization": f"Bearer {HF_TOKEN}"
-    }
+    api_url = "https://api-inference.huggingface.co/models/d4data/biomedical-ner-all"
+    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
     payload = {"inputs": text}
 
     try:
         response = requests.post(api_url, headers=headers, json=payload)
         response.raise_for_status()
         predictions = response.json()
+
         if isinstance(predictions, list) and predictions:
-            top_label = predictions[0][0]["label"]
-            confidence = predictions[0][0]["score"]
-            return f"🔍 **Possible Symptom Category**: *{top_label}* (Confidence: {confidence:.2f})"
+            filtered = [ent for ent in predictions[0] if ent["entity_group"] in {"SYMPTOM", "DISEASE", "DRUG"}]
+            if not filtered:
+                return "🔍 No symptoms or medical terms clearly identified."
+            result_lines = [f"• **{ent['word']}** (*{ent['entity_group']}*)" for ent in filtered]
+            return "🔍 **Identified Medical Terms:**\n" + "\n".join(result_lines)
         else:
-            return "⚠️ Unable to classify symptom."
+            return "⚠️ Unexpected response from model."
     except Exception as e:
         return f"⚠️ HF API Error: {e}"
 
-# Input
+# User input field
 user_input = st.text_input("Describe your symptoms or ask a medical question:")
 
-# Options
+# Option toggles
 include_meds = st.checkbox("💊 Suggest general medicines (OTC)")
 include_doctor = st.checkbox("👨‍⚕️ Recommend specialist doctor")
 
-# On submit
+# Handle input submission
 if user_input:
     st.session_state.chat_history.append(("You", user_input))
-    with st.spinner("Analyzing..."):
-        hf_result = classify_symptoms(user_input)
+
+    with st.spinner("Analyzing your symptoms and generating advice..."):
+        ner_result = classify_symptoms(user_input)
         try:
-            groq_result = query_groq(user_input, include_meds, include_doctor)
+            groq_response = query_groq(user_input, include_meds, include_doctor)
         except Exception as e:
-            groq_result = f"⚠️ Groq API Error: {e}"
+            groq_response = f"⚠️ Groq API Error: {e}"
 
-    combined_response = f"{hf_result}\n\n{groq_result}"
-    st.session_state.chat_history.append(("MedicalBot", combined_response))
+    final_response = f"{ner_result}\n\n{groq_response}"
+    st.session_state.chat_history.append(("MedicalBot", final_response))
 
-# Chat display
+# Display chat history
 for speaker, msg in st.session_state.chat_history:
     if speaker == "You":
         st.markdown(f"**🧑 {speaker}:** {msg}")
