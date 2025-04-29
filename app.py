@@ -2,31 +2,37 @@ import os
 import streamlit as st
 from dotenv import load_dotenv
 import requests
+from PIL import Image
+import io
+import fitz  # PyMuPDF
 
 # Load secrets
 load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 HF_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
 
-# Streamlit config
 st.set_page_config(page_title="Medical Assistant Chatbot", layout="centered")
 st.title("🩺 AI Medical Assistant")
-st.markdown("Describe symptoms to get help with conditions, medicines, or doctor recommendations.")
+st.markdown("Describe your symptoms or upload medical reports for interpretation.")
 
 # Chat history
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# Query Groq API
+# File Uploads
+st.subheader("📑 Upload Medical Report (Image or PDF)")
+uploaded_file = st.file_uploader("Supported: Blood report (PDF), ECG/X-ray (Image)", type=["pdf", "png", "jpg", "jpeg"])
+
+# ---------- GROQ Function ----------
 def query_groq(message, include_medicine=False, include_doctor=False):
     system_prompt = (
         "You are a professional, safe, and helpful medical assistant. "
-        "You give general advice only and do not diagnose or prescribe. "
+        "You explain medical content in simple terms. "
     )
     if include_medicine:
-        system_prompt += "You can suggest over-the-counter medicines with clear safety notes. "
+        system_prompt += "You can suggest general over-the-counter medicines. "
     if include_doctor:
-        system_prompt += "Recommend a type of doctor if needed, like dermatologist, pediatrician, etc. "
+        system_prompt += "You can recommend a medical specialist. "
 
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
@@ -46,7 +52,7 @@ def query_groq(message, include_medicine=False, include_doctor=False):
     response.raise_for_status()
     return response.json()["choices"][0]["message"]["content"]
 
-# Hugging Face NER for symptom/medical term extraction
+# ---------- HUGGING FACE NER ----------
 def classify_symptoms(text):
     api_url = "https://api-inference.huggingface.co/models/d4data/biomedical-ner-all"
     headers = {"Authorization": f"Bearer {HF_TOKEN}"}
@@ -57,7 +63,6 @@ def classify_symptoms(text):
         response.raise_for_status()
         predictions = response.json()
 
-        # predictions is a flat list of entities
         filtered = [ent for ent in predictions if ent["entity_group"] in {"SYMPTOM", "DISEASE", "DRUG"}]
         if not filtered:
             return "🔍 No symptoms or medical terms clearly identified."
@@ -68,28 +73,71 @@ def classify_symptoms(text):
     except Exception as e:
         return f"⚠️ HF API Error: {e}"
 
-# Input
-user_input = st.text_input("Describe your symptoms or ask a medical question:")
+# ---------- HUGGING FACE IMAGE INTERPRETER ----------
+def describe_image(img_bytes):
+    api_url = "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-base"
+    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+    files = {"inputs": img_bytes}
 
-# Options
+    try:
+        response = requests.post(api_url, headers=headers, files=files)
+        response.raise_for_status()
+        caption = response.json()[0]["generated_text"]
+        return f"🖼️ **Image Interpretation:** {caption}"
+    except Exception as e:
+        return f"⚠️ Image interpretation error: {e}"
+
+# ---------- PDF Extractor ----------
+def extract_text_from_pdf(uploaded_pdf):
+    text = ""
+    try:
+        doc = fitz.open(stream=uploaded_pdf.read(), filetype="pdf")
+        for page in doc:
+            text += page.get_text()
+        return text.strip()
+    except Exception as e:
+        return f"⚠️ PDF extract error: {e}"
+
+# ---------- Process Uploaded Report ----------
+if uploaded_file:
+    if uploaded_file.type.startswith("image/"):
+        st.image(uploaded_file, caption="Uploaded Report", use_column_width=True)
+        with st.spinner("Analyzing image..."):
+            image_result = describe_image(uploaded_file)
+            simplified_explanation = query_groq(image_result)
+            st.markdown(image_result)
+            st.markdown(f"🧾 **Simplified Explanation:**\n{simplified_explanation}")
+
+    elif uploaded_file.type == "application/pdf":
+        with st.spinner("Extracting text from blood report..."):
+            pdf_text = extract_text_from_pdf(uploaded_file)
+            if pdf_text.startswith("⚠️"):
+                st.error(pdf_text)
+            else:
+                st.markdown("🧾 **Extracted Report Text (Preview):**")
+                st.text(pdf_text[:1000])  # Show preview
+                with st.spinner("Interpreting report..."):
+                    simplified_explanation = query_groq(f"Explain this medical report in simple language:\n{pdf_text}")
+                    st.markdown(f"🩺 **Simplified Explanation:**\n{simplified_explanation}")
+
+# ---------- Main Chatbot UI ----------
+st.subheader("💬 Symptom Checker and Medical Q&A")
+user_input = st.text_input("Describe your symptoms or ask a medical question:")
 include_meds = st.checkbox("💊 Suggest general medicines (OTC)")
 include_doctor = st.checkbox("👨‍⚕️ Recommend specialist doctor")
 
-# On submit
 if user_input:
     st.session_state.chat_history.append(("You", user_input))
-
-    with st.spinner("Analyzing your input..."):
+    with st.spinner("Processing..."):
         ner_result = classify_symptoms(user_input)
         try:
             groq_result = query_groq(user_input, include_meds, include_doctor)
         except Exception as e:
             groq_result = f"⚠️ Groq API Error: {e}"
-
     final_response = f"{ner_result}\n\n{groq_result}"
     st.session_state.chat_history.append(("MedicalBot", final_response))
 
-# Chat display
+# Chat history
 for speaker, msg in st.session_state.chat_history:
     if speaker == "You":
         st.markdown(f"**🧑 {speaker}:** {msg}")
