@@ -1,5 +1,7 @@
-streamlit==1.33.0
-python-dotenv==1.0.1
-requests==2.31.0
-Pillow==10.2.0
-PyMuPDF==1.23.21
+streamlit
+requests
+python-dotenv
+huggingface_hub
+Pillow
+PyMuPDF
+joblib
