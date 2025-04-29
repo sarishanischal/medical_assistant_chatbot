@@ -3,7 +3,7 @@ import streamlit as st
 from dotenv import load_dotenv
 import requests
 
-# Load secrets from .env
+# Load secrets
 load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 HF_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
@@ -46,7 +46,7 @@ def query_groq(message, include_medicine=False, include_doctor=False):
     response.raise_for_status()
     return response.json()["choices"][0]["message"]["content"]
 
-# Hugging Face NER (symptom/entity extraction)
+# Hugging Face NER for symptom/medical term extraction
 def classify_symptoms(text):
     api_url = "https://api-inference.huggingface.co/models/d4data/biomedical-ner-all"
     headers = {"Authorization": f"Bearer {HF_TOKEN}"}
@@ -57,39 +57,39 @@ def classify_symptoms(text):
         response.raise_for_status()
         predictions = response.json()
 
-        if isinstance(predictions, list) and predictions:
-            filtered = [ent for ent in predictions[0] if ent["entity_group"] in {"SYMPTOM", "DISEASE", "DRUG"}]
-            if not filtered:
-                return "🔍 No symptoms or medical terms clearly identified."
-            result_lines = [f"• **{ent['word']}** (*{ent['entity_group']}*)" for ent in filtered]
-            return "🔍 **Identified Medical Terms:**\n" + "\n".join(result_lines)
-        else:
-            return "⚠️ Unexpected response from model."
+        # predictions is a flat list of entities
+        filtered = [ent for ent in predictions if ent["entity_group"] in {"SYMPTOM", "DISEASE", "DRUG"}]
+        if not filtered:
+            return "🔍 No symptoms or medical terms clearly identified."
+        
+        result_lines = [f"• **{ent['word']}** (*{ent['entity_group']}*)" for ent in filtered]
+        return "🔍 **Identified Medical Terms:**\n" + "\n".join(result_lines)
+
     except Exception as e:
         return f"⚠️ HF API Error: {e}"
 
-# User input field
+# Input
 user_input = st.text_input("Describe your symptoms or ask a medical question:")
 
-# Option toggles
+# Options
 include_meds = st.checkbox("💊 Suggest general medicines (OTC)")
 include_doctor = st.checkbox("👨‍⚕️ Recommend specialist doctor")
 
-# Handle input submission
+# On submit
 if user_input:
     st.session_state.chat_history.append(("You", user_input))
 
-    with st.spinner("Analyzing your symptoms and generating advice..."):
+    with st.spinner("Analyzing your input..."):
         ner_result = classify_symptoms(user_input)
         try:
-            groq_response = query_groq(user_input, include_meds, include_doctor)
+            groq_result = query_groq(user_input, include_meds, include_doctor)
         except Exception as e:
-            groq_response = f"⚠️ Groq API Error: {e}"
+            groq_result = f"⚠️ Groq API Error: {e}"
 
-    final_response = f"{ner_result}\n\n{groq_response}"
+    final_response = f"{ner_result}\n\n{groq_result}"
     st.session_state.chat_history.append(("MedicalBot", final_response))
 
-# Display chat history
+# Chat display
 for speaker, msg in st.session_state.chat_history:
     if speaker == "You":
         st.markdown(f"**🧑 {speaker}:** {msg}")
