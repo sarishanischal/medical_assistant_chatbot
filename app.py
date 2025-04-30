@@ -6,6 +6,7 @@ from PIL import Image
 import io
 import fitz  # PyMuPDF
 import joblib
+import numpy as np
 from huggingface_hub import hf_hub_download
 
 # Load secrets
@@ -21,8 +22,8 @@ st.markdown("Describe your symptoms, check diabetes risk, or upload medical repo
 @st.cache_resource
 def load_diabetes_model():
     model_path = hf_hub_download(
-        repo_id="jaik256/diabetes2o",
-        filename="diabetes_model.pkl",
+        repo_id="jaik256/diebateRandomForest1",
+        filename="model.pkl",
         token=HF_TOKEN
     )
     return joblib.load(model_path)
@@ -136,12 +137,27 @@ if uploaded_file:
 
 # ---------- Diabetes Prediction UI ----------
 st.subheader("🧪 Diabetes Risk Prediction")
+
+pregnancies = st.number_input("Pregnancies", min_value=0, max_value=20, step=1)
 glucose = st.number_input("Glucose Level", min_value=0.0, max_value=300.0, step=1.0)
+blood_pressure = st.number_input("Blood Pressure", min_value=0.0, max_value=200.0, step=1.0)
+skin_thickness = st.number_input("Skin Thickness", min_value=0.0, max_value=100.0, step=1.0)
+insulin = st.number_input("Insulin", min_value=0.0, max_value=900.0, step=1.0)
 bmi = st.number_input("BMI", min_value=0.0, max_value=60.0, step=0.1)
+dpf = st.number_input("Diabetes Pedigree Function", min_value=0.0, max_value=2.5, step=0.01)
 age = st.number_input("Age", min_value=0, max_value=120)
 
 if st.button("Predict Diabetes Risk"):
-    input_data = [[glucose, bmi, age]]
+    input_data = [[
+        pregnancies,
+        glucose,
+        blood_pressure,
+        skin_thickness,
+        insulin,
+        bmi,
+        dpf,
+        age
+    ]]
     try:
         prediction = diabetes_model.predict(input_data)[0]
         if prediction == 1:
