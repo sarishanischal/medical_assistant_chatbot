@@ -14,6 +14,10 @@ load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 HF_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
 
+if not HF_TOKEN:
+    st.error("HUGGINGFACE_TOKEN not found in .env file. Please set a valid token.")
+    st.stop()
+
 st.set_page_config(page_title="Medical Assistant Chatbot", layout="centered")
 st.title("🩺 AI Medical Assistant")
 st.markdown("Describe your symptoms, check diabetes risk, or upload medical reports for interpretation.")
@@ -21,24 +25,31 @@ st.markdown("Describe your symptoms, check diabetes risk, or upload medical repo
 # Load Model, Scaler, and Encoder from Hugging Face
 @st.cache_resource
 def load_diabetes_model():
-    model_path = hf_hub_download(
-        repo_id="jaik256/diebatesWithReinforecement",
-        filename="multiclass_diabetes_model.pkl",
-        token=HF_TOKEN
-    )
-    scaler_path = hf_hub_download(
-        repo_id="jaik256/diebatesWithReinforecement",
-        filename="scaler.pkl",
-        token=HF_TOKEN
-    )
-    encoder_path = hf_hub_download(
-        repo_id="jaik256/diebatesWithReinforecement",
-        filename="label_encoder.pkl",
-        token=HF_TOKEN
-    )
-    return joblib.load(model_path), joblib.load(scaler_path), joblib.load(encoder_path)
+    try:
+        model_path = hf_hub_download(
+            repo_id="jaik256/diebatesWithReinforecement",  # Replace with correct repo ID if needed
+            filename="multiclass_diabetes_model.pkl",
+            token=HF_TOKEN
+        )
+        scaler_path = hf_hub_download(
+            repo_id="jaik256/diebatesWithReinforecement",
+            filename="scaler.pkl",
+            token=HF_TOKEN
+        )
+        encoder_path = hf_hub_download(
+            repo_id="jaik256/diebatesWithReinforecement",
+            filename="label_encoder.pkl",
+            token=HF_TOKEN
+        )
+        return joblib.load(model_path), joblib.load(scaler_path), joblib.load(encoder_path)
+    except Exception as e:
+        st.error(f"Failed to load diabetes model: {e}")
+        raise
 
-diabetes_model, scaler, encoder = load_diabetes_model()
+try:
+    diabetes_model, scaler, encoder = load_diabetes_model()
+except Exception:
+    st.stop()
 
 # Chat history
 if "chat_history" not in st.session_state:
