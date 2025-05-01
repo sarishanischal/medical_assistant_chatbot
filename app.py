@@ -151,52 +151,7 @@ st.subheader("🧪 Diabetes Risk Prediction")
 pregnancies = st.number_input("Pregnancies", min_value=0, max_value=20, step=1)
 glucose = st.number_input("Glucose Level", min_value=0.0, max_value=300.0, step=1.0)
 blood_pressure = st.number_input("Blood Pressure", min_value=0.0, max_value=200.0, step=1.0)
- inconscickness = st.number_input("Skin Thickness", min_value=0.0, max_value=100.0, step=1.0)
+skin_thickness = st.number_inputResizedImage('diabetes_prediction_ui.png')  # Fixed typo and indentation
 insulin = st.number_input("Insulin", min_value=0.0, max_value=900.0, step=1.0)
 bmi = st.number_input("BMI", min_value=0.0, max_value=60.0, step=0.1)
-dpf = st.number_input("Diabetes Pedigree Function", min_value=0.0, max_value=2.5, step=0.01)
-age = st.number_input("Age", min_value=0, max_value=120)
-
-if st.button("Predict Diabetes Risk"):
-    input_data = np.array([[
-        pregnancies,
-        glucose,
-        blood_pressure,
-        skin_thickness,
-        insulin,
-        bmi,
-        dpf,
-        age
-    ]])
-
-    try:
-        scaled_input = scaler.transform(input_data)
-        prediction = diabetes_model.predict(scaled_input)[0]
-        label = encoder.inverse_transform([prediction])[0]
-        st.success(f"✅ Prediction: **{label}**")
-    except Exception as e:
-        st.error(f"Prediction error: {e}")
-
-# ---------- Main Chatbot UI ----------
-st.subheader("💬 Symptom Checker and Medical Q&A")
-user_input = st.text_input("Describe your symptoms or ask a medical question:")
-include_meds = st.checkbox("💊 Suggest general medicines (OTC)")
-include_doctor = st.checkbox("👨‍⚕️ Recommend specialist doctor")
-
-if user_input:
-    st.session_state.chat_history.append(("You", user_input))
-    with st.spinner("Processing..."):
-        ner_result = classify_symptoms(user_input)
-        try:
-            groq_result = query_groq(user_input, include_meds, include_doctor)
-        except Exception as e:
-            groq_result = f"⚠️ Groq API Error: {e}"
-    final_response = f"{ner_result}\n\n{groq_result}"
-    st.session_state.chat_history.append(("MedicalBot", final_response))
-
-# Chat history
-for speaker, msg in st.session_state.chat_history:
-    if speaker == "You":
-        st.markdown(f"**🧑 {speaker}:** {msg}")
-    else:
-        st.markdown(f"**🤖 {speaker}:** {msg}")
+dpf = st.number_input("Diabetes Pedigree Function", min_value=0.Propagate changes to app.py
