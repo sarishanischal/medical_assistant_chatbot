@@ -9,7 +9,7 @@ import joblib
 import numpy as np
 from huggingface_hub import hf_hub_download
 
-# Load secrets
+# Load environment variables
 load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 HF_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
@@ -18,27 +18,37 @@ st.set_page_config(page_title="Medical Assistant Chatbot", layout="centered")
 st.title("🩺 AI Medical Assistant")
 st.markdown("Describe your symptoms, check diabetes risk, or upload medical reports for interpretation.")
 
-# Load Diabetes Prediction Model from Hugging Face
+# Load Model, Scaler, and Encoder from Hugging Face
 @st.cache_resource
 def load_diabetes_model():
     model_path = hf_hub_download(
-        repo_id="jaik256/diebateRandomForest1",
-        filename="model.pkl",
+        repo_id="jaik256/diebatesWithReinforecement",
+        filename="multiclass_diabetes_model.pkl",
         token=HF_TOKEN
     )
-    return joblib.load(model_path)
+    scaler_path = hf_hub_download(
+        repo_id="jaik256/diebatesWithReinforecement",
+        filename="scaler.pkl",
+        token=HF_TOKEN
+    )
+    encoder_path = hf_hub_download(
+        repo_id="jaik256/diebatesWithReinforecement",
+        filename="label_encoder.pkl",
+        token=HF_TOKEN
+    )
+    return joblib.load(model_path), joblib.load(scaler_path), joblib.load(encoder_path)
 
-diabetes_model = load_diabetes_model()
+diabetes_model, scaler, encoder = load_diabetes_model()
 
-# Chat history
+# Chat history state
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# File Uploads
+# File Upload UI
 st.subheader("📑 Upload Medical Report (Image or PDF)")
 uploaded_file = st.file_uploader("Supported: Blood report (PDF), ECG/X-ray (Image)", type=["pdf", "png", "jpg", "jpeg"])
 
-# ---------- GROQ Function ----------
+# GROQ API Call
 def query_groq(message, include_medicine=False, include_doctor=False):
     system_prompt = (
         "You are a professional, safe, and helpful medical assistant. "
@@ -67,7 +77,7 @@ def query_groq(message, include_medicine=False, include_doctor=False):
     response.raise_for_status()
     return response.json()["choices"][0]["message"]["content"]
 
-# ---------- HUGGING FACE NER ----------
+# Hugging Face Biomedical NER
 def classify_symptoms(text):
     api_url = "https://api-inference.huggingface.co/models/d4data/biomedical-ner-all"
     headers = {"Authorization": f"Bearer {HF_TOKEN}"}
@@ -77,8 +87,8 @@ def classify_symptoms(text):
         response = requests.post(api_url, headers=headers, json=payload)
         response.raise_for_status()
         predictions = response.json()
-
         filtered = [ent for ent in predictions if ent["entity_group"] in {"SYMPTOM", "DISEASE", "DRUG"}]
+
         if not filtered:
             return "🔍 No symptoms or medical terms clearly identified."
 
@@ -88,7 +98,7 @@ def classify_symptoms(text):
     except Exception as e:
         return f"⚠️ HF API Error: {e}"
 
-# ---------- HUGGING FACE IMAGE INTERPRETER ----------
+# Hugging Face Image Captioning
 def describe_image(img_bytes):
     api_url = "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-base"
     headers = {"Authorization": f"Bearer {HF_TOKEN}"}
@@ -102,10 +112,10 @@ def describe_image(img_bytes):
     except Exception as e:
         return f"⚠️ Image interpretation error: {e}"
 
-# ---------- PDF Extractor ----------
+# PDF Text Extraction
 def extract_text_from_pdf(uploaded_pdf):
-    text = ""
     try:
+        text = ""
         doc = fitz.open(stream=uploaded_pdf.read(), filetype="pdf")
         for page in doc:
             text += page.get_text()
@@ -113,29 +123,29 @@ def extract_text_from_pdf(uploaded_pdf):
     except Exception as e:
         return f"⚠️ PDF extract error: {e}"
 
-# ---------- Process Uploaded Report ----------
+# Process Uploaded File
 if uploaded_file:
     if uploaded_file.type.startswith("image/"):
         st.image(uploaded_file, caption="Uploaded Report", use_column_width=True)
         with st.spinner("Analyzing image..."):
             image_result = describe_image(uploaded_file)
-            simplified_explanation = query_groq(image_result)
+            simplified = query_groq(image_result)
             st.markdown(image_result)
-            st.markdown(f"🧾 **Simplified Explanation:**\n{simplified_explanation}")
+            st.markdown(f"🧾 **Simplified Explanation:**\n{simplified}")
 
     elif uploaded_file.type == "application/pdf":
-        with st.spinner("Extracting text from blood report..."):
+        with st.spinner("Extracting text from report..."):
             pdf_text = extract_text_from_pdf(uploaded_file)
             if pdf_text.startswith("⚠️"):
                 st.error(pdf_text)
             else:
                 st.markdown("🧾 **Extracted Report Text (Preview):**")
-                st.text(pdf_text[:1000])  # Show preview
+                st.text(pdf_text[:1000])
                 with st.spinner("Interpreting report..."):
-                    simplified_explanation = query_groq(f"Explain this medical report in simple language:\n{pdf_text}")
-                    st.markdown(f"🩺 **Simplified Explanation:**\n{simplified_explanation}")
+                    simplified = query_groq(f"Explain this medical report:\n{pdf_text}")
+                    st.markdown(f"🩺 **Simplified Explanation:**\n{simplified}")
 
-# ---------- Diabetes Prediction UI ----------
+# Diabetes Prediction UI
 st.subheader("🧪 Diabetes Risk Prediction")
 
 pregnancies = st.number_input("Pregnancies", min_value=0, max_value=20, step=1)
@@ -148,7 +158,7 @@ dpf = st.number_input("Diabetes Pedigree Function", min_value=0.0, max_value=2.5
 age = st.number_input("Age", min_value=0, max_value=120)
 
 if st.button("Predict Diabetes Risk"):
-    input_data = [[
+    input_data = np.array([[
         pregnancies,
         glucose,
         blood_pressure,
@@ -157,17 +167,17 @@ if st.button("Predict Diabetes Risk"):
         bmi,
         dpf,
         age
-    ]]
-    try:
-        prediction = diabetes_model.predict(input_data)[0]
-        if prediction == 1:
-            st.error("⚠️ High Risk of Diabetes Detected")
-        else:
-            st.success("✅ Low Risk of Diabetes")
-    except Exception as e:
-        st.warning(f"Prediction error: {e}")
+    ]])
 
-# ---------- Main Chatbot UI ----------
+    try:
+        scaled_input = scaler.transform(input_data)
+        prediction = diabetes_model.predict(scaled_input)[0]
+        label = encoder.inverse_transform([prediction])[0]
+        st.success(f"✅ Prediction: **{label}**")
+    except Exception as e:
+        st.error(f"Prediction error: {e}")
+
+# Symptom Checker Chatbot
 st.subheader("💬 Symptom Checker and Medical Q&A")
 user_input = st.text_input("Describe your symptoms or ask a medical question:")
 include_meds = st.checkbox("💊 Suggest general medicines (OTC)")
@@ -181,10 +191,11 @@ if user_input:
             groq_result = query_groq(user_input, include_meds, include_doctor)
         except Exception as e:
             groq_result = f"⚠️ Groq API Error: {e}"
+
     final_response = f"{ner_result}\n\n{groq_result}"
     st.session_state.chat_history.append(("MedicalBot", final_response))
 
-# Chat history
+# Show chat history
 for speaker, msg in st.session_state.chat_history:
     if speaker == "You":
         st.markdown(f"**🧑 {speaker}:** {msg}")
